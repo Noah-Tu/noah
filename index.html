@@ -227,6 +227,13 @@
         </table>
     </div>
 
+    <div class="card" style="text-align: center; margin-top: 20px;">
+        <h3 style="margin-top: 0; color: #2c3e50; font-size: 1.1em;">🔄 資料同步與備份</h3>
+        <p style="font-size: 0.9em; color: #7f8c8d; margin-bottom: 15px;">若要在手機與電腦間轉移資料，請使用匯出與匯入功能。</p>
+        <button onclick="exportData()" style="background-color: #f39c12; margin-right: 10px; margin-bottom: 10px;">📤 匯出資料代碼</button>
+        <button onclick="importData()" style="background-color: #8e44ad; margin-bottom: 10px;">📥 貼上並匯入</button>
+    </div>
+
     <script>
         // 初始化載入 LocalStorage 中的資料
         let bills = JSON.parse(localStorage.getItem('myBills')) || [];
@@ -361,6 +368,37 @@
                 });
             } else {
                 summaryCard.style.display = 'none'; // 全部繳清或沒帳單時，隱藏統計卡片
+            }
+        }
+
+        // 匯出資料
+        function exportData() {
+            if (bills.length === 0) {
+                alert("目前沒有任何帳單資料可以匯出喔！");
+                return;
+            }
+            const dataStr = JSON.stringify(bills);
+            prompt("請將以下這串代碼「全選並複製」，然後透過 Line 傳到你的手機上，再使用匯入功能貼上：", dataStr);
+        }
+
+        // 匯入資料
+        function importData() {
+            const dataStr = prompt("請貼上你複製的資料代碼：\n(⚠️ 注意：這將會覆蓋掉目前裝置上的所有帳單記錄)");
+            
+            if (dataStr) {
+                try {
+                    const importedBills = JSON.parse(dataStr);
+                    if (Array.isArray(importedBills)) {
+                        bills = importedBills;
+                        saveData();
+                        renderBills();
+                        alert("✅ 資料同步匯入成功！");
+                    } else {
+                        alert("❌ 匯入失敗：資料格式不正確！");
+                    }
+                } catch (e) {
+                    alert("❌ 匯入失敗：代碼不完整或有誤，請確認是否完整複製！");
+                }
             }
         }
 
