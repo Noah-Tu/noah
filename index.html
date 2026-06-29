@@ -192,3 +192,220 @@
         }
     </style>
 </head>
+<body>
+
+    <h2>📝 帳單記錄與管理</h2>
+    
+    <div id="syncMsg">☁️ 正在與雲端同步資料...</div>
+
+    <div class="card">
+        <form id="billForm">
+            <div class="form-group">
+                <div class="form-control">
+                    <label for="title">帳單標題 (例如：電費、信用卡)</label>
+                    <input type="text" id="title" required placeholder="請輸入帳單名稱">
+                </div>
+                <div class="form-control">
+                    <label for="amount">帳單金額 (NT$)</label>
+                    <input type="number" id="amount" required placeholder="0" min="0">
+                </div>
+            </div>
+            <div class="form-group">
+                <div class="form-control">
+                    <label for="dueDate">截止時間</label>
+                    <input type="date" id="dueDate" required>
+                </div>
+                <div class="form-control">
+                    <label for="method">預計/實際繳費方式</label>
+                    <select id="method">
+                        <option value="信用卡">信用卡</option>
+                        <option value="Line Pay">Line Pay</option>
+                        <option value="全支付">全支付</option>
+                        <option value="悠遊付">悠遊付</option>
+                        <option value="icash">icash</option>
+                        <option value="悠遊卡">悠遊卡</option>
+                        <option value="銀行轉帳">銀行轉帳</option>
+                        <option value="現金/超商">現金/超商</option>
+                    </select>
+                </div>
+            </div>
+            <button type="submit" style="width: 100%;">新增帳單</button>
+        </form>
+    </div>
+
+    <div class="card" id="summaryCard" style="display: none;">
+        <h3 style="margin-top: 0; color: #2c3e50; font-size: 1.2em;">📊 每月應繳總計 (尚未繳納)</h3>
+        <div id="summaryContent"></div>
+    </div>
+
+    <div class="card">
+        <table>
+            <thead>
+                <tr>
+                    <th>帳單標題</th>
+                    <th>金額</th>
+                    <th>截止時間</th>
+                    <th>繳費方式</th>
+                    <th>狀態</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody id="billList"></tbody>
+        </table>
+    </div>
+
+    <script>
+        // 你專屬的 Google Apps Script 網址
+        const API_URL = 'https://script.google.com/macros/s/AKfycbyPht0aPv3z-D9wPyJ_ldSCaUhNklQc6ZUeEy6ePPKTRqjl20XN6kpDQ00ywqzLfat-/exec';
+        
+        const availableMethods = ['信用卡', 'Line Pay', '全支付', '悠遊付', 'icash', '悠遊卡', '銀行轉帳', '現金/超商'];
+        let bills = [];
+
+        const billForm = document.getElementById('billForm');
+        const billList = document.getElementById('billList');
+        const summaryCard = document.getElementById('summaryCard');
+        const summaryContent = document.getElementById('summaryContent');
+        const syncMsg = document.getElementById('syncMsg');
+
+        // 網頁載入時，從 Google 雲端抓取資料
+        window.onload = async function() {
+            syncMsg.style.display = 'block';
+            syncMsg.innerText = '☁️ 正在從雲端讀取資料...';
+            
+            try {
+                const response = await fetch(API_URL);
+                const data = await response.json();
+                bills = Array.isArray(data) ? data : [];
+                renderBills();
+            } catch (error) {
+                console.error('讀取失敗:', error);
+                // 為了不干擾使用體驗，若讀取失敗依然會顯示空白列表供使用者新增
+            } finally {
+                syncMsg.style.display = 'none';
+            }
+        };
+
+        // 儲存資料到 Google 雲端 (加強版，繞過瀏覽器 CORS 限制)
+        async function saveDataToCloud() {
+            syncMsg.style.display = 'block';
+            syncMsg.innerText = '☁️ 正在將變更儲存至雲端...';
+            
+            try {
+                await fetch(API_URL, {
+                    method: 'POST',
+                    mode: 'no-cors', // 關鍵設定：強制通關
+                    headers: {
+                        'Content-Type': 'text/plain;charset=utf-8',
+                    },
+                    body: JSON.stringify(bills)
+                });
+            } catch (error) {
+                console.error('儲存失敗:', error);
+            } finally {
+                syncMsg.style.display = 'none';
+            }
+        }
+
+        billForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            const newBill = {
+                id: Date.now(),
+                title: document.getElementById('title').value,
+                amount: Number(document.getElementById('amount').value), 
+                dueDate: document.getElementById('dueDate').value,
+                method: document.getElementById('method').value,
+                isPaid: false
+            };
+            bills.push(newBill);
+            renderBills();       // 畫面立即更新
+            saveDataToCloud();   // 背景默默上傳雲端
+            billForm.reset();
+        });
+
+        function toggleStatus(id) {
+            bills = bills.map(bill => bill.id === id ? { ...bill, isPaid: !bill.isPaid } : bill);
+            renderBills();
+            saveDataToCloud();
+        }
+
+        function updateMethod(id, newMethod) {
+            bills = bills.map(bill => bill.id === id ? { ...bill, method: newMethod } : bill);
+            saveDataToCloud(); // 改變選單後直接上傳，不需重新渲染畫面
+        }
+
+        function deleteBill(id) {
+            if(confirm('確定要刪除這筆帳單記錄嗎？')) {
+                bills = bills.filter(bill => bill.id !== id);
+                renderBills();
+                saveDataToCloud();
+            }
+        }
+
+        function formatCurrency(amount) {
+            return new Intl.NumberFormat('zh-TW', { style: 'currency', currency: 'TWD', minimumFractionDigits: 0 }).format(amount);
+        }
+
+        function renderBills() {
+            billList.innerHTML = '';
+            summaryContent.innerHTML = '';
+            bills.sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
+            const monthlyTotals = {};
+
+            bills.forEach(bill => {
+                const tr = document.createElement('tr');
+                const statusClass = bill.isPaid ? 'paid' : 'unpaid';
+                const statusText = bill.isPaid ? '已繳清' : '未繳納';
+                const formattedAmount = formatCurrency(bill.amount);
+
+                const methodOptions = availableMethods.map(method => {
+                    const selected = method === bill.method ? 'selected' : '';
+                    return `<option value="${method}" ${selected}>${method}</option>`;
+                }).join('');
+
+                tr.innerHTML = `
+                    <td data-label="帳單標題">${bill.title}</td>
+                    <td data-label="金額" style="color: ${bill.isPaid ? '#7f8c8d' : '#e74c3c'}; font-weight: bold;">${formattedAmount}</td>
+                    <td data-label="截止時間">${bill.dueDate}</td>
+                    <td data-label="繳費方式">
+                        <select class="method-select" onchange="updateMethod(${bill.id}, this.value)">
+                            ${methodOptions}
+                        </select>
+                    </td>
+                    <td data-label="狀態">
+                        <button class="status-btn ${statusClass}" onclick="toggleStatus(${bill.id})">
+                            ${statusText}
+                        </button>
+                    </td>
+                    <td data-label="操作">
+                        <button class="delete-btn" onclick="deleteBill(${bill.id})">刪除</button>
+                    </td>
+                `;
+                billList.appendChild(tr);
+
+                if (!bill.isPaid && bill.dueDate) {
+                    const yearMonth = bill.dueDate.substring(0, 7); 
+                    if (!monthlyTotals[yearMonth]) monthlyTotals[yearMonth] = 0;
+                    monthlyTotals[yearMonth] += Number(bill.amount);
+                }
+            });
+
+            const activeMonths = Object.keys(monthlyTotals).sort(); 
+            if (activeMonths.length > 0) {
+                summaryCard.style.display = 'block'; 
+                activeMonths.forEach(yearMonth => {
+                    const [year, month] = yearMonth.split('-');
+                    const displayMonth = `${year}年${parseInt(month, 10)}月`; 
+                    const totalAmount = formatCurrency(monthlyTotals[yearMonth]);
+
+                    const div = document.createElement('div');
+                    div.className = 'summary-item';
+                    div.innerHTML = `<span>${displayMonth} 應繳金額：</span> <span class="summary-amount">${totalAmount}</span>`;
+                    summaryContent.appendChild(div);
+                });
+            } else {
+                summaryCard.style.display = 'none'; 
+            }
+        }
+    </script>
+</body>
+</html>
