@@ -32,6 +32,27 @@
             box-shadow: 0 4px 6px rgba(0,0,0,0.1);
             margin-bottom: 20px;
         }
+        
+        /* 統計區塊特別樣式 */
+        #summaryCard {
+            background-color: #f0f8ff; 
+            border-left: 5px solid #3498db;
+        }
+        .summary-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px dashed #b2bec3;
+            font-size: 1.1em;
+        }
+        .summary-item:last-child {
+            border-bottom: none;
+        }
+        .summary-amount {
+            color: var(--danger-color);
+            font-weight: bold;
+        }
+
         .form-group {
             display: flex;
             flex-wrap: wrap;
@@ -106,7 +127,7 @@
         }
         .delete-btn:hover { background-color: #95a5a6; }
         
-        /* 手機版卡片化設計（加入明顯間距與外框） */
+        /* 手機版卡片化設計 */
         @media (max-width: 600px) {
             table, thead, tbody, th, td, tr {
                 display: block;
@@ -183,6 +204,12 @@
         </form>
     </div>
 
+    <div class="card" id="summaryCard" style="display: none;">
+        <h3 style="margin-top: 0; color: #2c3e50; font-size: 1.2em;">📊 每月應繳總計 (尚未繳納)</h3>
+        <div id="summaryContent">
+            </div>
+    </div>
+
     <div class="card">
         <table>
             <thead>
@@ -206,6 +233,8 @@
 
         const billForm = document.getElementById('billForm');
         const billList = document.getElementById('billList');
+        const summaryCard = document.getElementById('summaryCard');
+        const summaryContent = document.getElementById('summaryContent');
 
         // 監聽表單提交事件
         billForm.addEventListener('submit', function(e) {
@@ -217,12 +246,12 @@
             const method = document.getElementById('method').value;
 
             const newBill = {
-                id: Date.now(), // 使用時間戳記作為唯一ID
+                id: Date.now(),
                 title: title,
-                amount: amount,
+                amount: Number(amount), // 確保儲存為數字格式
                 dueDate: dueDate,
                 method: method,
-                isPaid: false // 預設為未繳
+                isPaid: false
             };
 
             bills.push(newBill);
@@ -257,22 +286,34 @@
             localStorage.setItem('myBills', JSON.stringify(bills));
         }
 
-        // 渲染畫面
+        // 將數字格式化為台幣金額
+        function formatCurrency(amount) {
+            return new Intl.NumberFormat('zh-TW', { 
+                style: 'currency', 
+                currency: 'TWD', 
+                minimumFractionDigits: 0 
+            }).format(amount);
+        }
+
+        // 渲染畫面 (包含列表與統計)
         function renderBills() {
+            // 1. 清空目前的列表與統計畫面
             billList.innerHTML = '';
+            summaryContent.innerHTML = '';
             
             // 依據截止日期排序（由近到遠）
             bills.sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
 
+            // 用來存放每個月的總計金額
+            const monthlyTotals = {};
+
+            // 2. 產出列表並同時計算未繳金額
             bills.forEach(bill => {
+                // 處理帳單列表的 HTML
                 const tr = document.createElement('tr');
-                
-                // 判斷狀態按鈕的樣式與文字
                 const statusClass = bill.isPaid ? 'paid' : 'unpaid';
                 const statusText = bill.isPaid ? '已繳清' : '未繳納';
-
-                // 加上貨幣格式
-                const formattedAmount = new Intl.NumberFormat('zh-TW', { style: 'currency', currency: 'TWD', minimumFractionDigits: 0 }).format(bill.amount);
+                const formattedAmount = formatCurrency(bill.amount);
 
                 tr.innerHTML = `
                     <td data-label="帳單標題">${bill.title}</td>
@@ -289,7 +330,38 @@
                     </td>
                 `;
                 billList.appendChild(tr);
+
+                // 計算未繳金額統計
+                if (!bill.isPaid && bill.dueDate) {
+                    // 擷取 YYYY-MM
+                    const yearMonth = bill.dueDate.substring(0, 7); 
+                    if (!monthlyTotals[yearMonth]) {
+                        monthlyTotals[yearMonth] = 0;
+                    }
+                    monthlyTotals[yearMonth] += Number(bill.amount);
+                }
             });
+
+            // 3. 處理統計區塊的顯示邏輯
+            const activeMonths = Object.keys(monthlyTotals).sort(); // 將月份排序
+
+            if (activeMonths.length > 0) {
+                summaryCard.style.display = 'block'; // 有未繳帳單，顯示統計卡片
+                
+                activeMonths.forEach(yearMonth => {
+                    // 將 "2026-07" 轉換成 "2026年7月"
+                    const [year, month] = yearMonth.split('-');
+                    const displayMonth = `${year}年${parseInt(month, 10)}月`; 
+                    const totalAmount = formatCurrency(monthlyTotals[yearMonth]);
+
+                    const div = document.createElement('div');
+                    div.className = 'summary-item';
+                    div.innerHTML = `<span>${displayMonth} 應繳金額：</span> <span class="summary-amount">${totalAmount}</span>`;
+                    summaryContent.appendChild(div);
+                });
+            } else {
+                summaryCard.style.display = 'none'; // 全部繳清或沒帳單時，隱藏統計卡片
+            }
         }
 
         // 初始執行渲染
