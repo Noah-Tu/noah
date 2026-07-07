@@ -66,6 +66,13 @@
             color: var(--danger-color);
             font-weight: bold;
         }
+        .method-summary-title {
+            margin: 20px 0 10px 0;
+            padding-top: 15px;
+            border-top: 2px dashed #bdc3c7;
+            color: #34495e;
+            font-size: 1.1em;
+        }
         .form-group {
             display: flex;
             flex-wrap: wrap;
@@ -89,6 +96,11 @@
             border-radius: 4px;
             font-size: 1em;
         }
+        .btn-group {
+            display: flex;
+            gap: 10px;
+            width: 100%;
+        }
         button {
             background-color: var(--primary-color);
             color: white;
@@ -101,6 +113,12 @@
         }
         button:hover {
             background-color: #1a252f;
+        }
+        .btn-cancel {
+            background-color: #95a5a6;
+        }
+        .btn-cancel:hover {
+            background-color: #7f8c8d;
         }
         table {
             width: 100%;
@@ -139,15 +157,25 @@
         }
         .paid { background-color: var(--success-color); }
         .unpaid { background-color: var(--danger-color); }
-        .delete-btn {
-            background-color: #7f8c8d;
-            color: white;
-            border: none;
-            padding: 5px 10px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 0.8em;
+        
+        .action-group {
+            display: flex;
+            gap: 5px;
+            flex-wrap: wrap;
         }
+        .action-btn {
+            padding: 5px 8px;
+            border-radius: 4px;
+            font-size: 0.8em;
+            cursor: pointer;
+            border: none;
+            color: white;
+        }
+        .cal-btn { background-color: #3498db; }
+        .edit-btn { background-color: #f39c12; }
+        .delete-btn { background-color: #7f8c8d; }
+        .cal-btn:hover { background-color: #2980b9; }
+        .edit-btn:hover { background-color: #e67e22; }
         .delete-btn:hover { background-color: #95a5a6; }
         
         @media (max-width: 600px) {
@@ -189,6 +217,9 @@
             .method-select {
                 max-width: 130px;
             }
+            .action-group {
+                justify-content: flex-end;
+            }
         }
     </style>
 </head>
@@ -229,13 +260,17 @@
                     </select>
                 </div>
             </div>
-            <button type="submit" style="width: 100%;">新增帳單</button>
+            <div class="btn-group">
+                <button type="submit" id="submitBtn" style="flex: 2;">新增帳單</button>
+                <button type="button" id="cancelEditBtn" class="btn-cancel" onclick="cancelEdit()" style="display: none; flex: 1;">取消編輯</button>
+            </div>
         </form>
     </div>
 
     <div class="card" id="summaryCard" style="display: none;">
-        <h3 style="margin-top: 0; color: #2c3e50; font-size: 1.2em;">📊 每月應繳總計 (尚未繳納)</h3>
+        <h3 style="margin-top: 0; color: #2c3e50; font-size: 1.2em;">📊 應繳統計 (尚未繳納)</h3>
         <div id="summaryContent"></div>
+        <div id="methodSummaryContent" style="display: none;"></div>
     </div>
 
     <div class="card">
@@ -255,17 +290,21 @@
     </div>
 
     <script>
-        // 你專屬的 Google Apps Script 網址
+        // 你的 Google Apps Script 網址
         const API_URL = 'https://script.google.com/macros/s/AKfycbyPht0aPv3z-D9wPyJ_ldSCaUhNklQc6ZUeEy6ePPKTRqjl20XN6kpDQ00ywqzLfat-/exec';
         
         const availableMethods = ['信用卡', 'Line Pay', '全支付', '悠遊付', 'icash', '悠遊卡', '銀行轉帳', '現金/超商'];
         let bills = [];
+        let editingId = null; // 用來記錄目前正在編輯哪一筆帳單
 
         const billForm = document.getElementById('billForm');
         const billList = document.getElementById('billList');
         const summaryCard = document.getElementById('summaryCard');
         const summaryContent = document.getElementById('summaryContent');
+        const methodSummaryContent = document.getElementById('methodSummaryContent');
         const syncMsg = document.getElementById('syncMsg');
+        const submitBtn = document.getElementById('submitBtn');
+        const cancelEditBtn = document.getElementById('cancelEditBtn');
 
         // 網頁載入時，從 Google 雲端抓取資料
         window.onload = async function() {
@@ -279,13 +318,12 @@
                 renderBills();
             } catch (error) {
                 console.error('讀取失敗:', error);
-                // 為了不干擾使用體驗，若讀取失敗依然會顯示空白列表供使用者新增
             } finally {
                 syncMsg.style.display = 'none';
             }
         };
 
-        // 儲存資料到 Google 雲端 (加強版，繞過瀏覽器 CORS 限制)
+        // 儲存資料到 Google 雲端
         async function saveDataToCloud() {
             syncMsg.style.display = 'block';
             syncMsg.innerText = '☁️ 正在將變更儲存至雲端...';
@@ -293,10 +331,8 @@
             try {
                 await fetch(API_URL, {
                     method: 'POST',
-                    mode: 'no-cors', // 關鍵設定：強制通關
-                    headers: {
-                        'Content-Type': 'text/plain;charset=utf-8',
-                    },
+                    mode: 'no-cors',
+                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                     body: JSON.stringify(bills)
                 });
             } catch (error) {
@@ -306,21 +342,87 @@
             }
         }
 
+        // 提交表單 (新增 或 編輯)
         billForm.addEventListener('submit', function(e) {
             e.preventDefault();
-            const newBill = {
-                id: Date.now(),
-                title: document.getElementById('title').value,
-                amount: Number(document.getElementById('amount').value), 
-                dueDate: document.getElementById('dueDate').value,
-                method: document.getElementById('method').value,
-                isPaid: false
-            };
-            bills.push(newBill);
-            renderBills();       // 畫面立即更新
-            saveDataToCloud();   // 背景默默上傳雲端
-            billForm.reset();
+            
+            const titleVal = document.getElementById('title').value;
+            const amountVal = Number(document.getElementById('amount').value);
+            const dueDateVal = document.getElementById('dueDate').value;
+            const methodVal = document.getElementById('method').value;
+
+            if (editingId) {
+                // 更新現有帳單
+                bills = bills.map(bill => {
+                    if (bill.id === editingId) {
+                        return { ...bill, title: titleVal, amount: amountVal, dueDate: dueDateVal, method: methodVal };
+                    }
+                    return bill;
+                });
+                cancelEdit(); // 結束編輯狀態
+            } else {
+                // 建立新帳單
+                const newBill = {
+                    id: Date.now(),
+                    title: titleVal,
+                    amount: amountVal, 
+                    dueDate: dueDateVal,
+                    method: methodVal,
+                    isPaid: false
+                };
+                bills.push(newBill);
+                billForm.reset();
+            }
+            
+            renderBills();       
+            saveDataToCloud();   
         });
+
+        // 進入編輯模式
+        function editBill(id) {
+            const bill = bills.find(b => b.id === id);
+            if (!bill) return;
+
+            document.getElementById('title').value = bill.title;
+            document.getElementById('amount').value = bill.amount;
+            document.getElementById('dueDate').value = bill.dueDate;
+            document.getElementById('method').value = bill.method;
+
+            editingId = id;
+            submitBtn.innerText = '💾 儲存修改';
+            cancelEditBtn.style.display = 'block';
+            window.scrollTo({ top: 0, behavior: 'smooth' }); // 自動捲動到最上方表單
+        }
+
+        // 取消編輯模式
+        function cancelEdit() {
+            editingId = null;
+            billForm.reset();
+            submitBtn.innerText = '新增帳單';
+            cancelEditBtn.style.display = 'none';
+        }
+
+        // 下載/開啟 ICS 行事曆檔案 (支援 iPhone 行事曆)
+        function addToCalendar(id) {
+            const bill = bills.find(b => b.id === id);
+            if (!bill) return;
+
+            // 將 YYYY-MM-DD 轉為 YYYYMMDD 格式
+            const dateStr = bill.dueDate.replace(/-/g, '');
+            
+            // 建立標準的 iCalendar (ICS) 內容，包含一天前的鬧鐘提醒
+            const icsData = `BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Noah Bill Tracker//TW\r\nBEGIN:VEVENT\r\nDTSTART;VALUE=DATE:${dateStr}\r\nSUMMARY:繳費：${bill.title}\r\nDESCRIPTION:金額：${bill.amount}元\\n方式：${bill.method}\r\nBEGIN:VALARM\r\nTRIGGER:-P1D\r\nACTION:DISPLAY\r\nDESCRIPTION:Reminder\r\nEND:VALARM\r\nEND:VEVENT\r\nEND:VCALENDAR`;
+
+            // 觸發下載
+            const blob = new Blob([icsData], { type: 'text/calendar;charset=utf-8' });
+            const url = window.URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.setAttribute('download', `繳費_${bill.title}.ics`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
 
         function toggleStatus(id) {
             bills = bills.map(bill => bill.id === id ? { ...bill, isPaid: !bill.isPaid } : bill);
@@ -330,7 +432,7 @@
 
         function updateMethod(id, newMethod) {
             bills = bills.map(bill => bill.id === id ? { ...bill, method: newMethod } : bill);
-            saveDataToCloud(); // 改變選單後直接上傳，不需重新渲染畫面
+            saveDataToCloud(); 
         }
 
         function deleteBill(id) {
@@ -348,8 +450,12 @@
         function renderBills() {
             billList.innerHTML = '';
             summaryContent.innerHTML = '';
+            methodSummaryContent.innerHTML = '';
+            
             bills.sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
+            
             const monthlyTotals = {};
+            const methodTotals = {}; // 儲存各繳費方式的總計
 
             bills.forEach(bill => {
                 const tr = document.createElement('tr');
@@ -377,18 +483,27 @@
                         </button>
                     </td>
                     <td data-label="操作">
-                        <button class="delete-btn" onclick="deleteBill(${bill.id})">刪除</button>
+                        <div class="action-group">
+                            <button type="button" class="action-btn cal-btn" onclick="addToCalendar(${bill.id})" title="加入行事曆">🗓️ 日曆</button>
+                            <button type="button" class="action-btn edit-btn" onclick="editBill(${bill.id})">✏️ 編輯</button>
+                            <button type="button" class="action-btn delete-btn" onclick="deleteBill(${bill.id})">🗑️</button>
+                        </div>
                     </td>
                 `;
                 billList.appendChild(tr);
 
+                // 計算統計 (僅計算未繳)
                 if (!bill.isPaid && bill.dueDate) {
                     const yearMonth = bill.dueDate.substring(0, 7); 
                     if (!monthlyTotals[yearMonth]) monthlyTotals[yearMonth] = 0;
                     monthlyTotals[yearMonth] += Number(bill.amount);
+
+                    if (!methodTotals[bill.method]) methodTotals[bill.method] = 0;
+                    methodTotals[bill.method] += Number(bill.amount);
                 }
             });
 
+            // 渲染每月總計
             const activeMonths = Object.keys(monthlyTotals).sort(); 
             if (activeMonths.length > 0) {
                 summaryCard.style.display = 'block'; 
@@ -399,11 +514,29 @@
 
                     const div = document.createElement('div');
                     div.className = 'summary-item';
-                    div.innerHTML = `<span>${displayMonth} 應繳金額：</span> <span class="summary-amount">${totalAmount}</span>`;
+                    div.innerHTML = `<span>📅 ${displayMonth}：</span> <span class="summary-amount">${totalAmount}</span>`;
                     summaryContent.appendChild(div);
                 });
             } else {
                 summaryCard.style.display = 'none'; 
+            }
+
+            // 渲染各繳費方式統計
+            const activeMethods = Object.keys(methodTotals).sort();
+            if (activeMethods.length > 0) {
+                methodSummaryContent.style.display = 'block';
+                methodSummaryContent.innerHTML = '<h4 class="method-summary-title">💳 未繳分類 (依繳費方式)</h4>';
+                
+                // 為了排版美觀，這裡將其轉換為陣列後依照金額大到小排序
+                activeMethods.sort((a, b) => methodTotals[b] - methodTotals[a]).forEach(method => {
+                    const totalAmount = formatCurrency(methodTotals[method]);
+                    const div = document.createElement('div');
+                    div.className = 'summary-item';
+                    div.innerHTML = `<span>${method}：</span> <span class="summary-amount" style="color: #e67e22;">${totalAmount}</span>`;
+                    methodSummaryContent.appendChild(div);
+                });
+            } else {
+                methodSummaryContent.style.display = 'none';
             }
         }
     </script>
