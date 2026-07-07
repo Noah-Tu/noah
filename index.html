@@ -247,6 +247,15 @@
                     <input type="date" id="dueDate" required>
                 </div>
                 <div class="form-control">
+                    <label for="reminder">提醒時間 (自動加入行事曆用)</label>
+                    <select id="reminder">
+                        <option value="-P1D">前一天</option>
+                        <option value="-P3D">前三天</option>
+                        <option value="-P7D">前一週</option>
+                        <option value="PT0H">當天</option>
+                    </select>
+                </div>
+                <div class="form-control">
                     <label for="method">預計/實際繳費方式</label>
                     <select id="method">
                         <option value="信用卡">信用卡</option>
@@ -295,7 +304,7 @@
         
         const availableMethods = ['信用卡', 'Line Pay', '全支付', '悠遊付', 'icash', '悠遊卡', '銀行轉帳', '現金/超商'];
         let bills = [];
-        let editingId = null; // 用來記錄目前正在編輯哪一筆帳單
+        let editingId = null; 
 
         const billForm = document.getElementById('billForm');
         const billList = document.getElementById('billList');
@@ -349,17 +358,18 @@
             const titleVal = document.getElementById('title').value;
             const amountVal = Number(document.getElementById('amount').value);
             const dueDateVal = document.getElementById('dueDate').value;
+            const reminderVal = document.getElementById('reminder').value;
             const methodVal = document.getElementById('method').value;
 
             if (editingId) {
                 // 更新現有帳單
                 bills = bills.map(bill => {
                     if (bill.id === editingId) {
-                        return { ...bill, title: titleVal, amount: amountVal, dueDate: dueDateVal, method: methodVal };
+                        return { ...bill, title: titleVal, amount: amountVal, dueDate: dueDateVal, reminder: reminderVal, method: methodVal };
                     }
                     return bill;
                 });
-                cancelEdit(); // 結束編輯狀態
+                cancelEdit(); 
             } else {
                 // 建立新帳單
                 const newBill = {
@@ -367,6 +377,7 @@
                     title: titleVal,
                     amount: amountVal, 
                     dueDate: dueDateVal,
+                    reminder: reminderVal,
                     method: methodVal,
                     isPaid: false
                 };
@@ -386,12 +397,14 @@
             document.getElementById('title').value = bill.title;
             document.getElementById('amount').value = bill.amount;
             document.getElementById('dueDate').value = bill.dueDate;
+            // 如果舊帳單沒有提醒時間，預設帶入前一天
+            document.getElementById('reminder').value = bill.reminder || '-P1D'; 
             document.getElementById('method').value = bill.method;
 
             editingId = id;
             submitBtn.innerText = '💾 儲存修改';
             cancelEditBtn.style.display = 'block';
-            window.scrollTo({ top: 0, behavior: 'smooth' }); // 自動捲動到最上方表單
+            window.scrollTo({ top: 0, behavior: 'smooth' }); 
         }
 
         // 取消編輯模式
@@ -402,18 +415,21 @@
             cancelEditBtn.style.display = 'none';
         }
 
-        // 下載/開啟 ICS 行事曆檔案 (支援 iPhone 行事曆)
+        // 下載/開啟 ICS 行事曆檔案 (加入 UID 防止重複建立)
         function addToCalendar(id) {
             const bill = bills.find(b => b.id === id);
             if (!bill) return;
 
-            // 將 YYYY-MM-DD 轉為 YYYYMMDD 格式
             const dateStr = bill.dueDate.replace(/-/g, '');
+            // 抓取帳單設定的提醒時間，舊帳單若無設定則預設前一天
+            const reminderTrigger = bill.reminder || '-P1D'; 
             
-            // 建立標準的 iCalendar (ICS) 內容，包含一天前的鬧鐘提醒
-            const icsData = `BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Noah Bill Tracker//TW\r\nBEGIN:VEVENT\r\nDTSTART;VALUE=DATE:${dateStr}\r\nSUMMARY:繳費：${bill.title}\r\nDESCRIPTION:金額：${bill.amount}元\\n方式：${bill.method}\r\nBEGIN:VALARM\r\nTRIGGER:-P1D\r\nACTION:DISPLAY\r\nDESCRIPTION:Reminder\r\nEND:VALARM\r\nEND:VEVENT\r\nEND:VCALENDAR`;
+            // 加入當下時間戳記與專屬 UID (讓 iOS 知道這是同一筆事件，以便覆蓋更新)
+            const now = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+            const uid = `bill-${bill.id}@noah.tracker`;
+            
+            const icsData = `BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Noah Bill Tracker//TW\r\nBEGIN:VEVENT\r\nUID:${uid}\r\nDTSTAMP:${now}\r\nDTSTART;VALUE=DATE:${dateStr}\r\nSUMMARY:繳費：${bill.title}\r\nDESCRIPTION:金額：${bill.amount}元\\n方式：${bill.method}\r\nBEGIN:VALARM\r\nTRIGGER:${reminderTrigger}\r\nACTION:DISPLAY\r\nDESCRIPTION:Reminder\r\nEND:VALARM\r\nEND:VEVENT\r\nEND:VCALENDAR`;
 
-            // 觸發下載
             const blob = new Blob([icsData], { type: 'text/calendar;charset=utf-8' });
             const url = window.URL.createObjectURL(blob);
             const link = document.createElement('a');
@@ -455,7 +471,7 @@
             bills.sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
             
             const monthlyTotals = {};
-            const methodTotals = {}; // 儲存各繳費方式的總計
+            const methodTotals = {}; 
 
             bills.forEach(bill => {
                 const tr = document.createElement('tr');
@@ -527,7 +543,6 @@
                 methodSummaryContent.style.display = 'block';
                 methodSummaryContent.innerHTML = '<h4 class="method-summary-title">💳 未繳分類 (依繳費方式)</h4>';
                 
-                // 為了排版美觀，這裡將其轉換為陣列後依照金額大到小排序
                 activeMethods.sort((a, b) => methodTotals[b] - methodTotals[a]).forEach(method => {
                     const totalAmount = formatCurrency(methodTotals[method]);
                     const div = document.createElement('div');
